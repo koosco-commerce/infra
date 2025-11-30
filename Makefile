@@ -18,7 +18,16 @@ KAFKA_COMPOSE = kafka/docker-compose.yaml
 K8S_DIR = k8s
 NAMESPACE = commerce
 NAMESPACE_FILE = $(K8S_DIR)/namespace.yaml
-INGRESS_FILE = $(K8S_DIR)/ingress.yaml
+
+# Environment (dev or prod)
+ENV ?= dev
+
+# Ingress file selection based on environment
+ifeq ($(ENV),prod)
+    INGRESS_FILE = $(K8S_DIR)/ingress.yaml
+else
+    INGRESS_FILE = $(K8S_DIR)/ingress-dev.yaml
+endif
 
 # Services
 SERVICES = catalog-service auth-service user-service
@@ -130,21 +139,23 @@ k8s-ns-switch:
 
 # -------------------------------
 # Ingress 적용
+# 예: make k8s-ingress-apply (기본 dev)
+# 예: make k8s-ingress-apply ENV=prod
 # -------------------------------
 k8s-ingress-apply:
+	@echo "$(YELLOW)Applying $(ENV) ingress...$(NC)"
 	kubectl apply -f $(INGRESS_FILE) -n $(NAMESPACE)
+	@echo "$(GREEN)✓ Ingress applied ($(ENV) environment)$(NC)"
 
 # -------------------------------
-# Ingress 삭제 (특정 파일)
-# 예: make k8s-ingress-delete INGRESS=ingress.yaml
+# Ingress 삭제 (환경별)
+# 예: make k8s-ingress-delete (기본 dev)
+# 예: make k8s-ingress-delete ENV=prod
 # -------------------------------
 k8s-ingress-delete:
-	@if [ -z "$(INGRESS)" ]; then \
-		echo "❌ Error: INGRESS variable is required"; \
-		echo "Usage: make k8s-ingress-delete INGRESS=ingress.yaml"; \
-		exit 1; \
-	fi
-	kubectl delete -f $(K8S_DIR)/$(INGRESS) -n $(NAMESPACE)
+	@echo "$(YELLOW)Deleting $(ENV) ingress...$(NC)"
+	kubectl delete -f $(INGRESS_FILE) -n $(NAMESPACE)
+	@echo "$(GREEN)✓ Ingress deleted ($(ENV) environment)$(NC)"
 
 # -------------------------------
 # 모든 Ingress 삭제
@@ -184,24 +195,47 @@ k8s-ingress-get:
 # Kubernetes 전체 상태 확인
 # -------------------------------
 k8s-status:
-	@echo "=== Namespace Status ==="
-	kubectl get namespace $(NAMESPACE) 2>/dev/null || echo "Namespace '$(NAMESPACE)' does not exist"
-	@echo ""
-	@echo "=== Ingress Status ==="
-	kubectl get ingress -n $(NAMESPACE) 2>/dev/null || echo "No ingresses found in namespace '$(NAMESPACE)'"
-	@echo ""
-	@echo "=== Services ==="
-	kubectl get services -n $(NAMESPACE) 2>/dev/null || echo "No services found in namespace '$(NAMESPACE)'"
-	@echo ""
-	@echo "=== Pods ==="
-	kubectl get pods -n $(NAMESPACE) 2>/dev/null || echo "No pods found in namespace '$(NAMESPACE)'"
+	@if [ -z "$(resource)" ]; then \
+		echo "=== Namespace Status ==="; \
+		kubectl get namespace $(NAMESPACE) 2>/dev/null || echo "Namespace '$(NAMESPACE)' does not exist"; \
+		echo ""; \
+		echo "=== Ingress ==="; \
+		kubectl get ingress -n $(NAMESPACE) 2>/dev/null || echo "No ingresses found in namespace '$(NAMESPACE)'"; \
+		echo ""; \
+		echo "=== Services ==="; \
+		kubectl get svc -n $(NAMESPACE) 2>/dev/null || echo "No services found in namespace '$(NAMESPACE)'"; \
+		echo ""; \
+		echo "=== Pods ==="; \
+		kubectl get pods -n $(NAMESPACE) 2>/dev/null || echo "No pods found in namespace '$(NAMESPACE)'"; \
+	else \
+		if [ "$(resource)" = "namespace" ]; then \
+			echo "=== Namespace Status ==="; \
+			kubectl get namespace $(NAMESPACE); \
+		elif [ "$(resource)" = "ingress" ]; then \
+			echo "=== Ingress ==="; \
+			kubectl get ingress -n $(NAMESPACE); \
+		elif [ "$(resource)" = "svc" ] || [ "$(resource)" = "services" ]; then \
+			echo "=== Services ==="; \
+			kubectl get svc -n $(NAMESPACE); \
+		elif [ "$(resource)" = "pods" ] || [ "$(resource)" = "pod" ]; then \
+			echo "=== Pods ==="; \
+			kubectl get pods -n $(NAMESPACE); \
+		else \
+			echo "Unknown resource: $(resource). Available: namespace | ingress | svc | pods"; \
+		fi \
+	fi
+
 
 # -------------------------------
 # 전체 k8s 리소스 적용
+# 예: make k8s-apply-all (기본 dev)
+# 예: make k8s-apply-all ENV=prod
 # -------------------------------
 k8s-apply-all:
+	@echo "$(YELLOW)Applying all k8s resources ($(ENV) environment)...$(NC)"
 	kubectl apply -f $(NAMESPACE_FILE)
 	kubectl apply -f $(INGRESS_FILE) -n $(NAMESPACE)
+	@echo "$(GREEN)✓ All resources applied$(NC)"
 
 # ===============================
 # Kubernetes Deployment 관리
@@ -283,9 +317,60 @@ k8s-scale-service:
 	@kubectl scale deployment/$(SERVICE) -n $(NAMESPACE) --replicas=$(REPLICAS)
 	@echo "$(GREEN)✓ $(SERVICE) scaled to $(REPLICAS) replicas$(NC)"
 
+# ===============================
+# 로컬 개발 (k3s)
+# ===============================
+
+# -------------------------------
+# Traefik IP 및 접근 정보 확인
+# -------------------------------
+k8s-traefik-ip:
+	@echo "$(GREEN)========================================$(NC)"
+	@echo "$(GREEN)  Traefik LoadBalancer Info$(NC)"
+	@echo "$(GREEN)========================================$(NC)"
+	@echo ""
+	@kubectl get svc traefik -n kube-system
+	@echo ""
+	@echo "$(YELLOW)✓ Access URLs:$(NC)"
+	@echo "  External IP: http://$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+	@echo "  NodePort:    http://localhost:$$(kubectl get svc traefik -n kube-system -o jsonpath='{.spec.ports[0].nodePort}')"
+	@echo ""
+	@echo "$(YELLOW)💡 Tip: Use 'make k8s-port-forward' for localhost:80$(NC)"
+
+# -------------------------------
+# localhost 포트 포워딩 (개발용)
+# 기본: 8080 포트 (권한 불필요)
+# 예: make k8s-port-forward
+# 예: make k8s-port-forward PORT=3000
+# 예: make k8s-port-forward PORT=80 (sudo 필요)
+# -------------------------------
+PORT ?= 8080
+
+k8s-port-forward:
+	@echo "$(GREEN)========================================$(NC)"
+	@echo "$(GREEN)  Port Forwarding: localhost:$(PORT)$(NC)"
+	@echo "$(GREEN)========================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)✓ Services available at:$(NC)"
+	@echo "  - http://localhost:$(PORT)/api/users"
+	@echo "  - http://localhost:$(PORT)/api/auth"
+	@echo "  - http://localhost:$(PORT)/api/catalog"
+	@echo "  - http://localhost:$(PORT)/api/orders"
+	@echo ""
+	@if [ "$(PORT)" -lt "1024" ]; then \
+		echo "$(RED)⚠ Port $(PORT) requires sudo (privileged port)$(NC)"; \
+		echo "$(YELLOW)Run: sudo make k8s-port-forward PORT=$(PORT)$(NC)"; \
+		echo "$(YELLOW)Or use: make k8s-port-forward PORT=8080$(NC)"; \
+		echo ""; \
+	fi
+	@echo "$(YELLOW)Press Ctrl+C to stop$(NC)"
+	@echo ""
+	kubectl port-forward -n kube-system svc/traefik $(PORT):80
+
 .PHONY: kafka-up kafka-down kafka-logs kafka-restart kafka-reset kafka-topics kafka-topic-create kafka-topic-delete kafka-ps \
 	k8s-ns-create k8s-ns-delete k8s-ns-list k8s-ns-info k8s-ns-switch \
 	k8s-ingress-apply k8s-ingress-delete k8s-ingress-delete-all \
 	k8s-ingress-list k8s-ingress-describe k8s-ingress-get \
 	k8s-status k8s-apply-all \
-	k8s-stop k8s-start k8s-scale k8s-restart k8s-deployments k8s-scale-service
+	k8s-stop k8s-start k8s-scale k8s-restart k8s-deployments k8s-scale-service \
+	k8s-traefik-ip k8s-port-forward
