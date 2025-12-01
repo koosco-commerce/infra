@@ -22,6 +22,9 @@ services:
       # 기타 설정
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
 
+      # 데이터 저장 경로
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
       # 단일 브로커 환경 설정
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
