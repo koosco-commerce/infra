@@ -11,19 +11,21 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-kraft:9093"
 
       # 리스너 설정
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
 
       # KRaft 클러스터 ID (고정값 사용 가능)
       KAFKA_CLUSTER_ID: "abcdefghijklmnopqrstuv"
 
-      # 개발 편의
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # 기타 설정
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+      # 단일 브로커 환경 설정
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
 
     volumes:
-      - kafka_data:/var/lib/kafka/data
-
-volumes:
-  kafka_data:
+      - ./kafka_data:/var/lib/kafka/data
