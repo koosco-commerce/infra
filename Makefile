@@ -2,6 +2,50 @@
 # Infra 관리용 Makefile
 # ===============================
 
+.DEFAULT_GOAL := help
+
+# -------------------------------
+# Help
+# -------------------------------
+help:
+	@echo "$(GREEN)========================================$(NC)"
+	@echo "$(GREEN)  Commerce Infrastructure Makefile$(NC)"
+	@echo "$(GREEN)========================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Kafka 관리:$(NC)"
+	@echo "  make kafka-local               - local Kafka 컨테이너 시작 (docker 사용)"
+	@echo "  make kafka-dev                 - dev Kafka 컨테이너 시작 (k3d cluster 사용)"
+	@echo "  make kafka-down                - Kafka 컨테이너 중지"
+	@echo "  make kafka-logs                - Kafka 로그 확인"
+	@echo "  make kafka-ps                  - Kafka 컨테이너 상태"
+	@echo ""
+	@echo "$(YELLOW)Kubernetes 관리:$(NC)"
+	@echo "  make k8s-ns-create             - Namespace 생성"
+	@echo "  make k8s-ns-delete             - Namespace 삭제"
+	@echo "  make k8s-status                - 전체 상태 확인"
+	@echo "  make k8s-apply-all             - 모든 리소스 적용"
+	@echo ""
+	@echo "$(YELLOW)Kubernetes Deployment:$(NC)"
+	@echo "  make k8s-start                 - 모든 서비스 시작"
+	@echo "  make k8s-stop                  - 모든 서비스 중지"
+	@echo "  make k8s-restart               - 모든 서비스 재시작"
+	@echo "  make k8s-scale                 - 스케일 조정 (REPLICAS=n)"
+	@echo "  make k8s-deployments           - Deployment 상태"
+	@echo ""
+	@echo "$(YELLOW)Kubernetes Ingress:$(NC)"
+	@echo "  make k8s-ingress-apply         - Ingress 적용 (ENV=dev|prod)"
+	@echo "  make k8s-ingress-list          - Ingress 목록"
+	@echo ""
+	@echo "$(YELLOW)로컬 개발 (k3s):$(NC)"
+	@echo "  make k8s-traefik-ip            - Traefik IP 확인"
+	@echo "  make k8s-port-forward          - 포트 포워딩 (PORT=8080)"
+	@echo ""
+	@echo "$(YELLOW)예제:$(NC)"
+	@echo "  make kafka-topics-setup                              # Kafka topics 전체 설정"
+	@echo "  make kafka-topics-describe TOPIC=koosco.order.v1     # Topic 상세 정보"
+	@echo "  make k8s-apply-all ENV=prod                          # 운영 환경 배포"
+	@echo ""
+
 # -------------------------------
 # Variables
 # -------------------------------
@@ -13,6 +57,8 @@ NC = \033[0m # No Color
 
 # Kafka
 KAFKA_COMPOSE = kafka/docker-compose.yaml
+KAFKA_TOPICS_SCRIPT = scripts/kafka-topics-manager.sh
+KAFKA_BOOTSTRAP_SERVERS ?= localhost:9092
 
 # Kubernetes
 K8S_DIR = k8s
@@ -35,8 +81,13 @@ SERVICES = catalog-service auth-service user-service
 # -------------------------------
 # Kafka 컨테이너 실행
 # -------------------------------
-kafka-up:
-	docker compose -f $(KAFKA_COMPOSE) up -d
+kafka-local:
+	docker compose -f $(KAFKA_COMPOSE) down
+	KAFKA_PROFILE=local KAFKA_ADVERTISED_HOST=host.docker.internal docker compose -f $(KAFKA_COMPOSE) up -d
+
+kafka-dev:
+	docker compose -f $(KAFKA_COMPOSE) down
+	KAFKA_PROFILE=dev KAFKA_ADVERTISED_HOST=host.k3d.internal docker compose -f $(KAFKA_COMPOSE) up -d
 
 # -------------------------------
 # Kafka 컨테이너 중지
@@ -49,22 +100,6 @@ kafka-down:
 # -------------------------------
 kafka-logs:
 	docker compose -f $(KAFKA_COMPOSE) logs -f
-
-# -------------------------------
-# Kafka 컨테이너 재시작
-# -------------------------------
-kafka-restart:
-	docker compose -f $(KAFKA_COMPOSE) down
-	docker compose -f $(KAFKA_COMPOSE) up -d
-
-# -------------------------------
-# Kafka 데이터 삭제(클린 상태 시작)
-# -------------------------------
-kafka-reset:
-	docker compose -f $(KAFKA_COMPOSE) down
-	sudo rm -rf kafka/kafka_data
-	mkdir -p kafka/kafka_data
-	docker compose -f $(KAFKA_COMPOSE) up -d
 
 # -------------------------------
 # Kafka 토픽 목록 확인
@@ -246,26 +281,47 @@ k8s-apply-all:
 # -------------------------------
 k8s-stop:
 	@echo "$(YELLOW)Stopping all services (scaling to 0)...$(NC)"
-	@kubectl scale deployment/catalog-service -n $(NAMESPACE) --replicas=0
-	@kubectl scale deployment/catalog-service-mariadb -n $(NAMESPACE) --replicas=0
-	@kubectl scale deployment/auth-service -n $(NAMESPACE) --replicas=0
-	@kubectl scale deployment/auth-service-mariadb -n $(NAMESPACE) --replicas=0
-	@kubectl scale deployment/user-service -n $(NAMESPACE) --replicas=0
-	@kubectl scale deployment/user-service-mariadb -n $(NAMESPACE) --replicas=0
-	@echo "$(GREEN)✓ All services stopped (replicas=0)$(NC)"
+	@echo ""
+	@for deploy in catalog-service catalog-service-mariadb auth-service auth-service-mariadb user-service user-service-mariadb; do \
+		replicas=$$(kubectl get deployment/$$deploy -n $(NAMESPACE) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0"); \
+		if [ "$$replicas" = "0" ]; then \
+			echo "  $(YELLOW)⊘$(NC) $$deploy: already stopped (replicas=0)"; \
+		else \
+			echo "  $(GREEN)→$(NC) $$deploy: stopping (replicas=$$replicas → 0)"; \
+			kubectl scale deployment/$$deploy -n $(NAMESPACE) --replicas=0 2>/dev/null || echo "  $(RED)✗$(NC) $$deploy: not found"; \
+		fi \
+	done
+	@echo ""
+	@echo "$(GREEN)✓ Stop operation complete$(NC)"
 
 # -------------------------------
 # 모든 서비스 시작
 # -------------------------------
 k8s-start:
 	@echo "$(YELLOW)Starting all services...$(NC)"
-	@kubectl scale deployment/catalog-service-mariadb -n $(NAMESPACE) --replicas=1
-	@kubectl scale deployment/catalog-service -n $(NAMESPACE) --replicas=2
-	@kubectl scale deployment/auth-service-mariadb -n $(NAMESPACE) --replicas=1
-	@kubectl scale deployment/auth-service -n $(NAMESPACE) --replicas=2
-	@kubectl scale deployment/user-service-mariadb -n $(NAMESPACE) --replicas=1
-	@kubectl scale deployment/user-service -n $(NAMESPACE) --replicas=2
-	@echo "$(GREEN)✓ All services started (replicas=2)$(NC)"
+	@echo ""
+	@for deploy in catalog-service-mariadb auth-service-mariadb user-service-mariadb; do \
+		target=1; \
+		replicas=$$(kubectl get deployment/$$deploy -n $(NAMESPACE) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0"); \
+		if [ "$$replicas" = "$$target" ]; then \
+			echo "  $(YELLOW)⊘$(NC) $$deploy: already running (replicas=$$target)"; \
+		else \
+			echo "  $(GREEN)→$(NC) $$deploy: starting (replicas=$$replicas → $$target)"; \
+			kubectl scale deployment/$$deploy -n $(NAMESPACE) --replicas=$$target 2>/dev/null || echo "  $(RED)✗$(NC) $$deploy: not found"; \
+		fi \
+	done
+	@for deploy in catalog-service auth-service user-service; do \
+		target=2; \
+		replicas=$$(kubectl get deployment/$$deploy -n $(NAMESPACE) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0"); \
+		if [ "$$replicas" = "$$target" ]; then \
+			echo "  $(YELLOW)⊘$(NC) $$deploy: already running (replicas=$$target)"; \
+		else \
+			echo "  $(GREEN)→$(NC) $$deploy: starting (replicas=$$replicas → $$target)"; \
+			kubectl scale deployment/$$deploy -n $(NAMESPACE) --replicas=$$target 2>/dev/null || echo "  $(RED)✗$(NC) $$deploy: not found"; \
+		fi \
+	done
+	@echo ""
+	@echo "$(GREEN)✓ Start operation complete$(NC)"
 
 # -------------------------------
 # 모든 서비스 스케일 조정
@@ -367,7 +423,8 @@ k8s-port-forward:
 	@echo ""
 	kubectl port-forward -n kube-system svc/traefik $(PORT):80
 
-.PHONY: kafka-up kafka-down kafka-logs kafka-restart kafka-reset kafka-topics kafka-topic-create kafka-topic-delete kafka-ps \
+.PHONY: help \
+	kafka-local kafka-dev kafka-down kafka-logs kafka-topics kafka-topic-create kafka-topic-delete kafka-ps \
 	k8s-ns-create k8s-ns-delete k8s-ns-list k8s-ns-info k8s-ns-switch \
 	k8s-ingress-apply k8s-ingress-delete k8s-ingress-delete-all \
 	k8s-ingress-list k8s-ingress-describe k8s-ingress-get \
