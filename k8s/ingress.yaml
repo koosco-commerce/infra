@@ -2,6 +2,83 @@
 # 사용법: 모든 서비스 배포 후 이 파일을 적용
 # kubectl apply -f k8s/ingress.yaml
 
+---
+# Traefik Middleware: CORS 설정
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-cors
+  namespace: commerce
+spec:
+  headers:
+    accessControlAllowMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "PATCH"
+      - "OPTIONS"
+    accessControlAllowOriginList:
+      - "*"
+    accessControlAllowCredentials: true
+    accessControlAllowHeaders:
+      - "DNT"
+      - "Keep-Alive"
+      - "User-Agent"
+      - "X-Requested-With"
+      - "If-Modified-Since"
+      - "Cache-Control"
+      - "Content-Type"
+      - "Range"
+      - "Authorization"
+    accessControlMaxAge: 100
+
+---
+# Traefik Middleware: Rate Limiting
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-ratelimit
+  namespace: commerce
+spec:
+  rateLimit:
+    average: 100
+    burst: 200
+
+---
+# Traefik Middleware: Security Headers
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-security-headers
+  namespace: commerce
+spec:
+  headers:
+    customResponseHeaders:
+      X-Content-Type-Options: "nosniff"
+      X-Frame-Options: "DENY"
+      X-XSS-Protection: "1; mode=block"
+      Referrer-Policy: "strict-origin-when-cross-origin"
+      Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+
+---
+# Traefik Middleware: Path Strip Prefix
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-strip-prefix
+  namespace: commerce
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/auth
+      - /api/users
+      - /api/orders
+      - /api/catalog
+      - /api/payments
+      - /api/notifications
+
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -10,36 +87,14 @@ metadata:
   labels:
     app: commerce-api
   annotations:
-    # Nginx Ingress Controller
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Traefik Ingress Controller
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure  # HTTPS 전용
+    traefik.ingress.kubernetes.io/router.middlewares: commerce-commerce-cors@kubernetescrd,commerce-commerce-ratelimit@kubernetescrd,commerce-commerce-security-headers@kubernetescrd
+    # TLS 인증서 자동 발급 (cert-manager 사용 시)
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 
-    # CORS settings
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
-
-    # Rate limiting
-    nginx.ingress.kubernetes.io/limit-rps: "100"
-    nginx.ingress.kubernetes.io/limit-connections: "10"
-
-    # Timeout settings
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-
-    # Security headers
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "X-Content-Type-Options: nosniff";
-      more_set_headers "X-Frame-Options: DENY";
-      more_set_headers "X-XSS-Protection: 1; mode=block";
-      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
-      more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
 spec:
-  ingressClassName: nginx
+  ingressClassName: traefik
   rules:
     - host: api.commerce.com # 메인 API 도메인
       http:
@@ -47,7 +102,7 @@ spec:
           # ==========================================
           # Auth Service - 인증/인가
           # ==========================================
-          - path: /api/auth(/|$)(.*)
+          - path: /api/auth
             pathType: Prefix
             backend:
               service:
@@ -58,7 +113,7 @@ spec:
           # ==========================================
           # User Service - 사용자 관리
           # ==========================================
-          - path: /api/users(/|$)(.*)
+          - path: /api/users
             pathType: Prefix
             backend:
               service:
@@ -69,7 +124,7 @@ spec:
           # ==========================================
           # Order Service - 주문 관리
           # ==========================================
-          - path: /api/orders(/|$)(.*)
+          - path: /api/orders
             pathType: Prefix
             backend:
               service:
@@ -80,7 +135,7 @@ spec:
           # ==========================================
           # Catalog Service - 상품 관리
           # ==========================================
-          - path: /api/catalog(/|$)(.*)
+          - path: /api/catalog
             pathType: Prefix
             backend:
               service:
@@ -91,7 +146,7 @@ spec:
           # ==========================================
           # Payment Service - 결제 처리
           # ==========================================
-          - path: /api/payments(/|$)(.*)
+          - path: /api/payments
             pathType: Prefix
             backend:
               service:
@@ -102,7 +157,7 @@ spec:
           # ==========================================
           # Notification Service - 알림
           # ==========================================
-          - path: /api/notifications(/|$)(.*)
+          - path: /api/notifications
             pathType: Prefix
             backend:
               service:

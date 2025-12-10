@@ -2,6 +2,50 @@
 # 사용법: kubectl apply -f k8s/ingress-dev.yaml
 # localhost로 접근 가능, HTTP 허용, 각 서비스 8080 포트 사용
 
+---
+# Traefik Middleware: CORS 설정
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-dev-cors
+  namespace: commerce
+spec:
+  headers:
+    accessControlAllowMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "PATCH"
+      - "OPTIONS"
+    accessControlAllowOriginList:
+      - "*"
+    accessControlAllowCredentials: true
+    accessControlAllowHeaders:
+      - "DNT"
+      - "Keep-Alive"
+      - "User-Agent"
+      - "X-Requested-With"
+      - "If-Modified-Since"
+      - "Cache-Control"
+      - "Content-Type"
+      - "Range"
+      - "Authorization"
+    accessControlMaxAge: 100
+
+---
+# Traefik Middleware: Rate Limiting (개발용 - 넉넉하게)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: commerce-dev-ratelimit
+  namespace: commerce
+spec:
+  rateLimit:
+    average: 1000
+    burst: 2000
+
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,30 +55,13 @@ metadata:
     app: commerce-api
     environment: development
   annotations:
-    # Nginx Ingress Controller
-    # nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/ssl-redirect: "false" # HTTP 허용
-
-    # CORS settings (개발 환경용 - 모든 origin 허용)
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
-
-    # Rate limiting (개발용 - 넉넉하게)
-    nginx.ingress.kubernetes.io/limit-rps: "1000"
-    nginx.ingress.kubernetes.io/limit-connections: "100"
-
-    # Timeout settings
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m" # 개발용 - 더 큰 바디 허용
+    # Traefik Ingress Controller
+    traefik.ingress.kubernetes.io/router.entrypoints: web  # HTTP 전용 (개발 환경)
+    traefik.ingress.kubernetes.io/router.middlewares: commerce-commerce-dev-cors@kubernetescrd,commerce-commerce-dev-ratelimit@kubernetescrd
 
 spec:
   # k3s uses Traefik by default - no ingressClassName needed
-  # ingressClassName: nginx
+  # ingressClassName: traefik
   rules:
     # host 없음 = localhost 포함 모든 호스트 허용
     - http:
