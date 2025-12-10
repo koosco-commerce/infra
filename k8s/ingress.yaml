@@ -88,7 +88,7 @@ metadata:
     app: commerce-api
   annotations:
     # Traefik Ingress Controller
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure  # HTTPS 전용
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure # HTTPS 전용
     traefik.ingress.kubernetes.io/router.middlewares: commerce-commerce-cors@kubernetescrd,commerce-commerce-ratelimit@kubernetescrd,commerce-commerce-security-headers@kubernetescrd
     # TLS 인증서 자동 발급 (cert-manager 사용 시)
     cert-manager.io/cluster-issuer: letsencrypt-prod
@@ -140,6 +140,17 @@ spec:
             backend:
               service:
                 name: catalog-service
+                port:
+                  number: 80
+
+          # ==========================================
+          # Inventory Service - 재고 관리
+          # ==========================================
+          - path: /api/inventory
+            pathType: Prefix
+            backend:
+              service:
+                name: inventory-service
                 port:
                   number: 80
 
