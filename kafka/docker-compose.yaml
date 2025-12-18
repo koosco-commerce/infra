@@ -2,33 +2,36 @@ services:
   kafka:
     image: apache/kafka:3.7.0
     container_name: kafka-kraft
-    ports:
-      - "9092:9092"
+    network_mode: host
+
     environment:
-      # KRaft 모드
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_NODE_ID: 1
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-kraft:9093"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@127.0.0.1:9093"
 
-      # 리스너 설정
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${KAFKA_ADVERTISED_HOST}:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://<EC2_PRIVATE_IP>:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
 
-      # KRaft 클러스터 ID (고정값 사용 가능)
       KAFKA_CLUSTER_ID: "abcdefghijklmnopqrstuv"
 
-      # 기타 설정
+      KAFKA_HEAP_OPTS: "-Xms2g -Xmx2g"
+
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
 
-      # 데이터 저장 경로
       KAFKA_LOG_DIRS: "/var/lib/kafka/data"
 
-      # 단일 브로커 환경 설정
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
 
+      KAFKA_JMX_PORT: 9999
+
     volumes:
       - ./kafka_data_${KAFKA_PROFILE:-local}:/var/lib/kafka/data
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 3g
