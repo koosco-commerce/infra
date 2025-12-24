@@ -4,9 +4,9 @@ services:
     container_name: commerce-mariadb
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_USER: admin
-      MYSQL_PASSWORD: admin1234
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_USER: admin
+      MARIADB_PASSWORD: admin1234
     ports:
       - "3306:3306"
     volumes:
