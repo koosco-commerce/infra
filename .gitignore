@@ -3,3 +3,6 @@ kafka-*
 mariadb_data/
 requests
 .DS_Store
+.env*
+**/docs/**
+**/data/**
